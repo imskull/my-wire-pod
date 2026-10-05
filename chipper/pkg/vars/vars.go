@@ -438,6 +438,18 @@ func GetRobot(esn string) (*vector.Vector, error) {
 }
 
 func GetOutboundIP() net.IP {
+	if configured := strings.TrimSpace(APIConfig.Server.AdvertiseIP); configured != "" {
+		addrs, err := net.InterfaceAddrs()
+		if err == nil {
+			var ip net.IP
+			ip, err = validateAdvertiseIP(configured, addrs)
+			if err == nil {
+				return ip
+			}
+		}
+		logger.Println("Configured advertise_ip is unavailable; refusing to advertise a VPN address:", err)
+		return net.IPv4zero
+	}
 	if runtime.GOOS == "android" {
 		ifaces, _ := anet.Interfaces()
 		for _, iface := range ifaces {

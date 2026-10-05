@@ -3,6 +3,7 @@ package mdnshandler
 import (
 	"context"
 	"fmt"
+	"net"
 	"os"
 	"strings"
 	"time"
@@ -70,8 +71,27 @@ func PostmDNS() {
 	PostingmDNS = true
 	logger.Println("Registering escapepod.local on network (loop)")
 	for {
-		ipAddr := vars.GetOutboundIP().String()
-		server, _ := zeroconf.RegisterProxy("escapepod", "_app-proto._tcp", "local.", 8084, "escapepod", []string{ipAddr}, []string{"txtv=0", "lo=1", "la=2"}, nil)
+		ip := vars.GetOutboundIP()
+		if ip.IsUnspecified() {
+			time.Sleep(5 * time.Second)
+			continue
+		}
+		var ifaces []net.Interface
+		if strings.TrimSpace(vars.APIConfig.Server.AdvertiseIP) != "" {
+			var err error
+			ifaces, err = vars.InterfacesForIP(ip)
+			if err != nil {
+				logger.Println("mDNS LAN interface unavailable:", err)
+				time.Sleep(5 * time.Second)
+				continue
+			}
+		}
+		server, err := zeroconf.RegisterProxy("escapepod", "_app-proto._tcp", "local.", 8084, "escapepod", []string{ip.String()}, []string{"txtv=0", "lo=1", "la=2"}, ifaces)
+		if err != nil {
+			logger.Println("mDNS registration failed:", err)
+			time.Sleep(5 * time.Second)
+			continue
+		}
 		if os.Getenv("PRINT_MDNS") == "true" {
 			logger.Println("mDNS broadcasted")
 		}

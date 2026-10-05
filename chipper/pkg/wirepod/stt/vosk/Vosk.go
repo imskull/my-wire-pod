@@ -21,6 +21,7 @@ var GrammerEnable bool = false
 var Name string = "vosk"
 
 var model *vosk.VoskModel
+var chineseModel *vosk.VoskModel
 var recsmu sync.Mutex
 
 var grmRecs []ARec
@@ -53,6 +54,10 @@ func Init() error {
 			gpRecs = []ARec{}
 			grmRecs = []ARec{}
 			model.Free()
+			if chineseModel != nil {
+				chineseModel.Free()
+				chineseModel = nil
+			}
 		}
 		sttLanguage := vars.APIConfig.STT.Language
 		if len(sttLanguage) == 0 {
@@ -70,6 +75,19 @@ func Init() error {
 			return err
 		}
 		model = aModel
+		if sttLanguage == "en-US" && vars.APIConfig.Knowledge.Enable {
+			chinesePath := filepath.Join(vars.VoskModelPath, "zh-CN", "model")
+			if _, err := os.Stat(chinesePath); err == nil {
+				chineseModel, err = vosk.NewModel(chinesePath)
+				if err != nil {
+					logger.Println("Chinese VOSK model unavailable:", err)
+				} else {
+					logger.Println("Bilingual recognition enabled: English commands and Chinese chat")
+				}
+			} else {
+				logger.Println("Chinese VOSK model not found; bilingual recognition disabled")
+			}
+		}
 		if GrammerEnable {
 			logger.Println("Initializing grammer list")
 			Grammer = GetGrammerList(vars.APIConfig.STT.Language)
@@ -143,11 +161,11 @@ func runTest() {
 
 func getRec(withGrm bool) (*vosk.VoskRecognizer, int) {
 	recsmu.Lock()
-	defer recsmu.Unlock()
 	if withGrm && GrammerEnable {
 		for ind, rec := range grmRecs {
 			if !rec.InUse {
 				grmRecs[ind].InUse = true
+				recsmu.Unlock()
 				return grmRecs[ind].Rec, ind
 			}
 		}
@@ -155,6 +173,7 @@ func getRec(withGrm bool) (*vosk.VoskRecognizer, int) {
 		for ind, rec := range gpRecs {
 			if !rec.InUse {
 				gpRecs[ind].InUse = true
+				recsmu.Unlock()
 				return gpRecs[ind].Rec, ind
 			}
 		}
@@ -176,10 +195,14 @@ func getRec(withGrm bool) (*vosk.VoskRecognizer, int) {
 	recsmu.Lock()
 	if withGrm {
 		grmRecs = append(grmRecs, newrec)
-		return grmRecs[len(grmRecs)-1].Rec, len(grmRecs) - 1
+		index := len(grmRecs) - 1
+		recsmu.Unlock()
+		return newrec.Rec, index
 	} else {
 		gpRecs = append(gpRecs, newrec)
-		return gpRecs[len(gpRecs)-1].Rec, len(gpRecs) - 1
+		index := len(gpRecs) - 1
+		recsmu.Unlock()
+		return newrec.Rec, index
 	}
 }
 
@@ -194,8 +217,31 @@ func STT(req sr.SpeechRequest) (string, error) {
 		withGrm = true
 	}
 	rec, recind := getRec(withGrm)
+	defer func() {
+		recsmu.Lock()
+		if withGrm {
+			grmRecs[recind].InUse = false
+		} else {
+			gpRecs[recind].InUse = false
+		}
+		recsmu.Unlock()
+	}()
 	rec.SetWords(1)
+	var chineseRecognizer *vosk.VoskRecognizer
+	if chineseModel != nil {
+		var err error
+		chineseRecognizer, err = vosk.NewRecognizer(chineseModel, 16000.0)
+		if err != nil {
+			logger.Println("Chinese recognizer unavailable:", err)
+		} else {
+			chineseRecognizer.SetWords(1)
+			defer chineseRecognizer.Free()
+		}
+	}
 	rec.AcceptWaveform(req.FirstReq)
+	if chineseRecognizer != nil {
+		chineseRecognizer.AcceptWaveform(req.FirstReq)
+	}
 	req.DetectEndOfSpeech()
 	for {
 		chunk, err := req.GetNextStreamChunk()
@@ -205,19 +251,22 @@ func STT(req sr.SpeechRequest) (string, error) {
 		speechIsDone, doProcess := req.DetectEndOfSpeech()
 		if doProcess {
 			rec.AcceptWaveform(chunk)
+			if chineseRecognizer != nil {
+				chineseRecognizer.AcceptWaveform(chunk)
+			}
 		}
 		if speechIsDone {
 			break
 		}
 	}
-	var jres map[string]interface{}
-	json.Unmarshal([]byte(rec.FinalResult()), &jres)
-	if withGrm {
-		grmRecs[recind].InUse = false
-	} else {
-		gpRecs[recind].InUse = false
+	englishResult := parseVoskResult(rec.FinalResult())
+	transcribedText := englishResult.Text
+	if chineseRecognizer != nil {
+		chineseResult := parseVoskResult(chineseRecognizer.FinalResult())
+		var language string
+		transcribedText, language = chooseBilingualResult(englishResult, chineseResult)
+		logger.Println("Bilingual VOSK selection: " + language + ", English confidence " + fmt.Sprintf("%.2f", averageConfidence(englishResult)) + ", Chinese confidence " + fmt.Sprintf("%.2f", averageConfidence(chineseResult)))
 	}
-	transcribedText := jres["text"].(string)
 	logger.Println("Bot " + req.Device + " Transcribed text: " + transcribedText)
 	return transcribedText, nil
 }

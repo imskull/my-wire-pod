@@ -6,6 +6,8 @@ It allows voice commands to work with any Vector 1.0 or 2.0 for no fee, includin
 
 ## Installation
 
+This fork's local-network, bilingual Vosk, and Windows Chinese speech changes are described in [Local Vector customizations](docs/local-vector-customizations.md).
+
 The installation guide exists on the wiki: [Installation guide](https://github.com/kercre123/wire-pod/wiki/Installation)
 
 ## Wiki

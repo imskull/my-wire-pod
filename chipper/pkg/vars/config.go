@@ -42,6 +42,7 @@ type apiConfig struct {
 		Language string `json:"language"`
 	} `json:"STT"`
 	Server struct {
+		AdvertiseIP string `json:"advertise_ip,omitempty"`
 		// false for ip, true for escape pod
 		EPConfig bool   `json:"epconfig"`
 		Port     string `json:"port"`

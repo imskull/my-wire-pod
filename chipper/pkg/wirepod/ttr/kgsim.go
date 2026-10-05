@@ -238,7 +238,6 @@ func StreamingKGSim(req interface{}, esn string, transcribedText string, isKG bo
 		}()
 	}
 	var fullRespText string
-	var fullfullRespText string
 	var fullRespSlice []string
 	var isDone bool
 	var c *openai.Client
@@ -258,8 +257,8 @@ func StreamingKGSim(req interface{}, esn string, transcribedText string, isKG bo
 	case "openai":
 		c = openai.NewClient(vars.APIConfig.Knowledge.Key)
 	}
-	speakReady := make(chan string)
-	successIntent := make(chan bool)
+	speakReady := make(chan string, 1)
+	successIntent := make(chan bool, 1)
 
 	aireq := CreateAIReq(transcribedText, esn, false, isKG)
 
@@ -299,7 +298,18 @@ func StreamingKGSim(req interface{}, esn string, transcribedText string, isKG bo
 		for {
 			response, err := stream.Recv()
 			if errors.Is(err, io.EOF) {
-				// prevents a crash
+				// The final sentence may have no punctuation at all.
+				if remainder := strings.TrimSpace(fullRespText); remainder != "" {
+					fullRespSlice = append(fullRespSlice, remainder)
+					select {
+					case successIntent <- true:
+					default:
+					}
+					select {
+					case speakReady <- remainder:
+					default:
+					}
+				}
 				if len(fullRespSlice) == 0 {
 					logger.Println("LLM returned no response")
 					successIntent <- false
@@ -315,19 +325,7 @@ func StreamingKGSim(req interface{}, esn string, transcribedText string, isKG bo
 					break
 				}
 				isDone = true
-				// if fullRespSlice != fullRespText, add that missing bit to fullRespSlice
-				newStr := fullRespSlice[0]
-				for i, str := range fullRespSlice {
-					if i == 0 {
-						continue
-					}
-					newStr = newStr + " " + str
-				}
-				if strings.TrimSpace(newStr) != strings.TrimSpace(fullfullRespText) {
-					logger.Println("LLM debug: there is content after the last punctuation mark")
-					extraBit := strings.TrimPrefix(fullRespText, newStr)
-					fullRespSlice = append(fullRespSlice, extraBit)
-				}
+				newStr := strings.Join(fullRespSlice, " ")
 				if vars.APIConfig.Knowledge.SaveChat {
 					Remember(openai.ChatCompletionMessage{
 						Role:    openai.ChatMessageRoleUser,
@@ -354,9 +352,8 @@ func StreamingKGSim(req interface{}, esn string, transcribedText string, isKG bo
 				return
 			}
 
-			fullfullRespText = fullfullRespText + removeSpecialCharacters(response.Choices[0].Delta.Content)
 			fullRespText = fullRespText + removeSpecialCharacters(response.Choices[0].Delta.Content)
-			if strings.Contains(fullRespText, "...") || strings.Contains(fullRespText, ".'") || strings.Contains(fullRespText, ".\"") || strings.Contains(fullRespText, ".") || strings.Contains(fullRespText, "?") || strings.Contains(fullRespText, "!") {
+			if strings.Contains(fullRespText, "...") || strings.Contains(fullRespText, ".'") || strings.Contains(fullRespText, ".\"") || strings.ContainsAny(fullRespText, ".?!。？！") {
 				var sepStr string
 				if strings.Contains(fullRespText, "...") {
 					sepStr = "..."
@@ -370,6 +367,12 @@ func StreamingKGSim(req interface{}, esn string, transcribedText string, isKG bo
 					sepStr = "?"
 				} else if strings.Contains(fullRespText, "!") {
 					sepStr = "!"
+				} else if strings.Contains(fullRespText, "。") {
+					sepStr = "。"
+				} else if strings.Contains(fullRespText, "？") {
+					sepStr = "？"
+				} else if strings.Contains(fullRespText, "！") {
+					sepStr = "！"
 				}
 				splitResp := strings.Split(strings.TrimSpace(fullRespText), sepStr)
 				fullRespSlice = append(fullRespSlice, strings.TrimSpace(splitResp[0])+sepStr)

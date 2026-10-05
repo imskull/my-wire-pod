@@ -7,8 +7,10 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"runtime"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/fforchino/vector-go-sdk/pkg/vector"
 	"github.com/fforchino/vector-go-sdk/pkg/vectorpb"
@@ -289,6 +291,13 @@ func DoSayText(input string, robot *vector.Vector) error {
 
 	// just before vector speaks
 	removeSpecialCharacters(input)
+	if runtime.GOOS == "windows" && strings.IndexFunc(input, func(r rune) bool { return unicode.Is(unicode.Han, r) }) >= 0 && vars.APIConfig.Knowledge.Provider != "openai" {
+		if err := DoSayText_WindowsChinese(robot, input); err == nil {
+			return nil
+		} else {
+			logger.Println("Windows Chinese TTS failed: " + err.Error())
+		}
+	}
 
 	if (vars.APIConfig.STT.Language != "en-US" && vars.APIConfig.Knowledge.Provider == "openai") || vars.APIConfig.Knowledge.OpenAIVoiceWithEnglish {
 		err := DoSayText_OpenAI(robot, input)
