@@ -5,6 +5,7 @@ import (
 
 	"github.com/kercre123/wire-pod/chipper/pkg/logger"
 	"github.com/kercre123/wire-pod/chipper/pkg/vars"
+	"github.com/kercre123/wire-pod/chipper/pkg/wirepod/barks"
 	sr "github.com/kercre123/wire-pod/chipper/pkg/wirepod/speechrequest"
 	ttr "github.com/kercre123/wire-pod/chipper/pkg/wirepod/ttr"
 )
@@ -71,6 +72,7 @@ func New(InitFunc func() error, SttHandler interface{}, voiceProcessor string) (
 
 	// Load plugins
 	ttr.LoadPlugins()
+	barks.Start()
 
 	return &Server{}, err
 }

@@ -43,6 +43,7 @@ type apiConfig struct {
 	} `json:"STT"`
 	Server struct {
 		AdvertiseIP string `json:"advertise_ip,omitempty"`
+		RandomBarks bool   `json:"random_barks,omitempty"`
 		// false for ip, true for escape pod
 		EPConfig bool   `json:"epconfig"`
 		Port     string `json:"port"`
